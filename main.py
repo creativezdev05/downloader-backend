@@ -1,9 +1,8 @@
 import os
 import uuid
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import yt_dlp
 
 app = FastAPI()
@@ -17,17 +16,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class DownloadRequest(BaseModel):
-    url: str
-
 # Helper to automatically clean up files after sending them to the phone
 def remove_file(path: str):
     if os.path.exists(path):
         os.remove(path)
 
-@app.post("/download")
-async def extract_and_download(request: DownloadRequest, background_tasks: BackgroundTasks):
-    video_url = request.url
+# GET with a query param: expo-file-system's background/resumable downloader
+# on Android always issues a plain GET and ignores any configured httpMethod/body,
+# so the video URL has to travel as a query parameter rather than a POST body.
+@app.get("/download")
+async def extract_and_download(background_tasks: BackgroundTasks, url: str = Query(...)):
+    video_url = url
     if not video_url:
         raise HTTPException(status_code=400, detail="URL is missing")
         
