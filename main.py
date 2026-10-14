@@ -6,6 +6,16 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import yt_dlp
 
+try:
+    # Lets yt-dlp impersonate a real browser's TLS fingerprint (requires the
+    # curl_cffi package). Without this, requests from a datacenter IP (like
+    # Render's) are far more likely to get flagged by TikTok's bot detection
+    # and served an empty/challenge page instead of the real video data.
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+    IMPERSONATE_TARGET = ImpersonateTarget.from_str('chrome')
+except Exception:
+    IMPERSONATE_TARGET = None
+
 app = FastAPI()
 
 # Allow connections from your React Native app
@@ -42,6 +52,8 @@ async def extract_and_download(background_tasks: BackgroundTasks, url: str = Que
         'merge_output_format': 'mp4',
         'quiet': True
     }
+    if IMPERSONATE_TARGET is not None:
+        ydl_opts['impersonate'] = IMPERSONATE_TARGET
     
     try:
         # Create storage folder if it doesn't exist
