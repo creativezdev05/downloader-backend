@@ -32,28 +32,76 @@ def remove_file(path: str):
     if os.path.exists(path):
         os.remove(path)
 
+# Maps the quality options the app's download sheet offers to a yt-dlp format
+# selector. Falls back to the best available stream for anything unrecognized.
+QUALITY_FORMATS = {
+    '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]',
+    '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]',
+    'audio': 'bestaudio[ext=m4a]/bestaudio/best',
+}
+DEFAULT_FORMAT = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+
+
+def _build_ydl_opts(output_template: str, quality: str | None):
+    ydl_opts = {
+        'format': QUALITY_FORMATS.get(quality, DEFAULT_FORMAT),
+        'outtmpl': output_template,
+        'merge_output_format': 'mp4',
+        'quiet': True,
+    }
+    if IMPERSONATE_TARGET is not None:
+        ydl_opts['impersonate'] = IMPERSONATE_TARGET
+    return ydl_opts
+
+
+# Lets the app show a thumbnail/title/quality picker before committing to a
+# download. Read-only: never touches disk.
+@app.get("/info")
+async def extract_info(url: str = Query(...)):
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is missing")
+
+    ydl_opts = {'quiet': True}
+    if IMPERSONATE_TARGET is not None:
+        ydl_opts['impersonate'] = IMPERSONATE_TARGET
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lookup failure: {type(e).__name__}: {e}")
+
+    formats = [
+        {'id': key, 'label': key, 'ext': 'm4a' if key == 'audio' else 'mp4'}
+        for key in QUALITY_FORMATS
+    ]
+
+    return {
+        'title': info.get('title') or url,
+        'thumbnail': info.get('thumbnail'),
+        'duration': info.get('duration'),
+        'formats': formats,
+    }
+
+
 # GET with a query param: expo-file-system's background/resumable downloader
 # on Android always issues a plain GET and ignores any configured httpMethod/body,
 # so the video URL has to travel as a query parameter rather than a POST body.
 @app.get("/download")
-async def extract_and_download(background_tasks: BackgroundTasks, url: str = Query(...)):
+async def extract_and_download(
+    background_tasks: BackgroundTasks,
+    url: str = Query(...),
+    quality: str = Query("best"),
+):
     video_url = url
     if not video_url:
         raise HTTPException(status_code=400, detail="URL is missing")
-        
+
     # Generate a completely unique local filename to prevent server user collision
     file_id = str(uuid.uuid4())
     output_template = f"downloads/{file_id}.%(ext)s"
-    
-    # Configure yt-dlp to grab high-quality streams and merge them automatically using FFmpeg
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': output_template,
-        'merge_output_format': 'mp4',
-        'quiet': True
-    }
-    if IMPERSONATE_TARGET is not None:
-        ydl_opts['impersonate'] = IMPERSONATE_TARGET
+
+    ydl_opts = _build_ydl_opts(output_template, quality)
     
     try:
         # Create storage folder if it doesn't exist
@@ -82,11 +130,16 @@ async def extract_and_download(background_tasks: BackgroundTasks, url: str = Que
         # Queue the clean-up task so your server doesn't run out of storage space
         background_tasks.add_task(remove_file, filename)
 
+        # Audio-only downloads land as .m4a, everything else as .mp4 - reflect
+        # whatever extension actually landed on disk rather than hardcoding mp4.
+        file_ext = os.path.splitext(filename)[1].lstrip('.') or 'mp4'
+        media_type = 'audio/mp4' if file_ext == 'm4a' else 'video/mp4'
+
         # Send the file down the pipe directly as a physical binary download
         return FileResponse(
             path=filename,
-            media_type='video/mp4',
-            filename=f"downloaded_video_{file_id}.mp4"
+            media_type=media_type,
+            filename=f"downloaded_video_{file_id}.{file_ext}"
         )
 
     except HTTPException:
