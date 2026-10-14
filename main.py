@@ -34,13 +34,22 @@ def remove_file(path: str):
 
 # Maps the quality options the app's download sheet offers to a yt-dlp format
 # selector. Falls back to the best available stream for anything unrecognized.
+#
+# Each per-height selector ends in an unconstrained `bestvideo+bestaudio/best`
+# fallback. TikTok/Instagram short-form clips often only expose one or two
+# renditions with no low-resolution options at all (e.g. a reel whose
+# smallest available stream is 840p) — without this, requesting 720p or
+# lower against such a video matched nothing at any step of the chain and
+# failed outright with "Requested format is not available", even though a
+# perfectly good (just higher-resolution) stream existed. Confirmed against
+# live TikTok/Instagram URLs on 2026-10-14.
 QUALITY_FORMATS = {
-    '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]',
-    '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]',
-    '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]',
-    '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]',
-    '240p': 'bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[height<=240][ext=mp4]/best[height<=240]',
-    '144p': 'bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[height<=144][ext=mp4]/best[height<=144]',
+    '1080p': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]/bestvideo+bestaudio/best',
+    '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]/bestvideo+bestaudio/best',
+    '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]/bestvideo+bestaudio/best',
+    '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]/bestvideo+bestaudio/best',
+    '240p': 'bestvideo[height<=240][ext=mp4]+bestaudio[ext=m4a]/best[height<=240][ext=mp4]/best[height<=240]/bestvideo+bestaudio/best',
+    '144p': 'bestvideo[height<=144][ext=mp4]+bestaudio[ext=m4a]/best[height<=144][ext=mp4]/best[height<=144]/bestvideo+bestaudio/best',
     'audio': 'bestaudio[ext=m4a]/bestaudio/best',
 }
 DEFAULT_FORMAT = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
