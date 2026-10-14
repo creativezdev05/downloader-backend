@@ -1,3 +1,4 @@
+import glob
 import os
 import uuid
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
@@ -45,26 +46,38 @@ async def extract_and_download(background_tasks: BackgroundTasks, url: str = Que
     try:
         # Create storage folder if it doesn't exist
         os.makedirs("downloads", exist_ok=True)
-        
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
-            # Find the true location of the freshly baked .mp4 file
-            filename = ydl.prepare_filename(info)
-            # Handle potential edge cases where merging changes extension slightly
-            filename = filename.rsplit('.', 1)[0] + '.mp4'
+            # Find the true location of the freshly baked file. Don't guess the
+            # extension from `info` (it can disagree with what actually landed on
+            # disk depending on merge behavior) - glob by the unique file_id prefix
+            # we gave outtmpl instead, which always matches whatever yt-dlp wrote.
+            matches = glob.glob(f"downloads/{file_id}.*")
+            filename = matches[0] if matches else None
 
-        if not os.path.exists(filename):
-            raise HTTPException(status_code=500, detail="File processing failed on server")
-            
+        if not filename or not os.path.exists(filename):
+            existing = os.listdir("downloads") if os.path.isdir("downloads") else []
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"File processing failed on server: expected output for id "
+                    f"'{file_id}' (resolved ext '{info.get('ext') if info else '?'}') "
+                    f"but found no matching file. downloads/ currently contains: {existing}"
+                ),
+            )
+
         # Queue the clean-up task so your server doesn't run out of storage space
         background_tasks.add_task(remove_file, filename)
-        
+
         # Send the file down the pipe directly as a physical binary download
         return FileResponse(
-            path=filename, 
-            media_type='video/mp4', 
+            path=filename,
+            media_type='video/mp4',
             filename=f"downloaded_video_{file_id}.mp4"
         )
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Extraction failure: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Extraction failure: {type(e).__name__}: {e}")
